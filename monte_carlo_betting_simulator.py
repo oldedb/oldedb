@@ -172,9 +172,25 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         promo_decimal = american_to_decimal(promo_odds)
         regular_decimal = american_to_decimal(regular_odds)
 
-        # Size regular bet so that net outcome is similar regardless of result
-        # promo_bet * promo_decimal ≈ regular_bet * regular_decimal
-        regular_bet = (promo_bet * promo_decimal) / regular_decimal
+        # Calculate required regular bet for full hedge
+        required_regular_bet = (promo_bet * promo_decimal) / regular_decimal
+
+        # If we can't afford the full hedge, reduce promo bet size
+        if required_regular_bet > regular_balance:
+            # Calculate max promo bet we can afford to hedge
+            max_affordable_promo_bet = (regular_balance * regular_decimal) / promo_decimal
+            promo_bet = min(promo_bet, max_affordable_promo_bet * 0.95)  # 95% for safety margin
+
+            # Recalculate regular bet with reduced promo bet
+            required_regular_bet = (promo_bet * promo_decimal) / regular_decimal
+
+            # Double-check we can still place the bet
+            if promo_bet < config.min_bet_size or required_regular_bet > regular_balance:
+                # Can't place minimum bet with proper hedge
+                exit_reason = "insufficient_capital"
+                break
+
+        regular_bet = required_regular_bet
 
         # Simulate outcome (50/50 chance for each side)
         promo_wins = random.random() < 0.5
@@ -251,9 +267,19 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     initial_capital = config.deposit * 2
     avg_roi = (avg_profit / initial_capital) * 100
 
-    # Exit reasons
+    # Exit reasons and profit breakdown
     lost_promo = sum(1 for r in results if r.exit_reason == "lost_promo")
     rollover_met = sum(1 for r in results if r.exit_reason == "rollover_met")
+    insufficient_capital = sum(1 for r in results if r.exit_reason == "insufficient_capital")
+
+    # Profit by exit scenario
+    lost_promo_profits = [r.net_profit for r in results if r.exit_reason == "lost_promo"]
+    rollover_met_profits = [r.net_profit for r in results if r.exit_reason == "rollover_met"]
+    insufficient_capital_profits = [r.net_profit for r in results if r.exit_reason == "insufficient_capital"]
+
+    avg_profit_lost_promo = np.mean(lost_promo_profits) if lost_promo_profits else 0
+    avg_profit_rollover = np.mean(rollover_met_profits) if rollover_met_profits else 0
+    avg_profit_insufficient_capital = np.mean(insufficient_capital_profits) if insufficient_capital_profits else 0
 
     # Betting statistics
     avg_bets = np.mean(num_bets)
@@ -299,7 +325,14 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
 
     print("\n🎲 EXIT SCENARIOS:")
     print(f"  Lost Promo Book:        {lost_promo:,} ({lost_promo/len(results)*100:.1f}%)")
+    if lost_promo > 0:
+        print(f"    → Avg Profit:         ${avg_profit_lost_promo:,.2f}")
     print(f"  Rollover Met:           {rollover_met:,} ({rollover_met/len(results)*100:.1f}%)")
+    if rollover_met > 0:
+        print(f"    → Avg Profit:         ${avg_profit_rollover:,.2f}")
+    if insufficient_capital > 0:
+        print(f"  Insufficient Capital:   {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%)")
+        print(f"    → Avg Profit:         ${avg_profit_insufficient_capital:,.2f}")
 
     print("\n🎯 BETTING STATISTICS:")
     print(f"  Average Bets Needed:    {avg_bets:.1f}")
