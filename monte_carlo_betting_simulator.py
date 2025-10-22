@@ -244,6 +244,11 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
 
         regular_bet = required_regular_bet
 
+        # Track capital requirement BEFORE outcome (when money is at risk)
+        # This represents the actual capital deployed for this bet
+        balance_after_bet_placement = regular_balance - regular_bet
+        min_regular_balance = min(min_regular_balance, balance_after_bet_placement)
+
         # Simulate outcome (50/50 chance for each side)
         promo_wins = random.random() < 0.5
 
@@ -255,9 +260,6 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         # Update balances
         promo_balance += promo_change
         regular_balance += regular_change
-
-        # Track capital requirements
-        min_regular_balance = min(min_regular_balance, regular_balance)
 
         # Update rollover
         rollover_achieved += promo_bet
@@ -294,7 +296,8 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         net_profit = total_final - initial_capital
 
     # Calculate capital requirement (how much hedge book was actually needed)
-    capital_deployed = config.regular_book_balance - min_regular_balance
+    # This represents the maximum capital deployed at any point
+    capital_deployed = max(0, config.regular_book_balance - min_regular_balance)
 
     return SimulationResult(
         net_profit=net_profit,
