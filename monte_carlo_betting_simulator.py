@@ -21,6 +21,7 @@ class BettingConfig:
     rollover_multiplier: float  # e.g., 10 for 10x rollover
     min_hold: float  # e.g., 0.0 for 0%
     max_hold: float  # e.g., 0.035 for 3.5%
+    target_hold: float  # e.g., 0.018 for 1.8% - peak of distribution
     min_bet_size: float
     max_bet_size: float
     num_simulations: int
@@ -121,8 +122,10 @@ def generate_bet_scenario(config: BettingConfig, promo_balance: float) -> Tuple[
     while -100 <= promo_odds <= 100:
         promo_odds = random.randint(config.min_promo_odds, config.max_promo_odds)
 
-    # Generate target hold
-    target_hold = random.uniform(config.min_hold, config.max_hold)
+    # Generate target hold using triangular distribution
+    # This creates more opportunities around the target hold (sweet spot)
+    # with fewer opportunities at the extremes
+    target_hold = random.triangular(config.min_hold, config.max_hold, config.target_hold)
 
     # Calculate opposing odds to achieve target hold
     regular_odds = find_opposing_odds(promo_odds, target_hold)
@@ -304,7 +307,7 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print(f"  Regular Book Balance:   ${config.regular_book_balance:,.2f}")
     print(f"  Total Initial Capital:  ${config.deposit + config.regular_book_balance:,.2f}")
     print(f"  Rollover Requirement:   {config.rollover_multiplier}x (${(config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier:,.2f})")
-    print(f"  Hold Range:             {config.min_hold*100:.2f}% - {config.max_hold*100:.2f}%")
+    print(f"  Hold Range:             {config.min_hold*100:.2f}% - {config.max_hold*100:.2f}% (target: {config.target_hold*100:.2f}%)")
     print(f"  Bet Size Range:         ${config.min_bet_size:,.2f} - ${config.max_bet_size:,.2f}")
     print(f"  Promo Odds Range:       {config.min_promo_odds:+d} to {config.max_promo_odds:+d}")
     print(f"  Simulations:            {config.num_simulations:,}")
@@ -363,6 +366,8 @@ def main():
                        help="Minimum hold percentage (default: 0.0)")
     parser.add_argument("--max-hold", type=float, default=0.035,
                        help="Maximum hold percentage (default: 0.035 for 3.5%%)")
+    parser.add_argument("--target-hold", type=float, default=0.018,
+                       help="Target hold percentage - peak of distribution (default: 0.018 for 1.8%%)")
     parser.add_argument("--min-bet", type=float, default=500.0,
                        help="Minimum bet size (default: 500)")
     parser.add_argument("--max-bet", type=float, default=1500.0,
@@ -385,6 +390,7 @@ def main():
         rollover_multiplier=args.rollover,
         min_hold=args.min_hold,
         max_hold=args.max_hold,
+        target_hold=args.target_hold,
         min_bet_size=args.min_bet,
         max_bet_size=args.max_bet,
         num_simulations=args.simulations,
