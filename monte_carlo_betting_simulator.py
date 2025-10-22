@@ -26,6 +26,7 @@ class BettingConfig:
     num_simulations: int
     min_promo_odds: int  # e.g., -200
     max_promo_odds: int  # e.g., 450
+    regular_book_balance: float  # Starting balance in regular (hedge) book
 
 
 @dataclass
@@ -151,7 +152,7 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     """Run a single simulation of the betting strategy"""
     # Initial balances
     promo_balance = config.deposit + (config.deposit * config.bonus_percentage / 100)
-    regular_balance = config.deposit
+    regular_balance = config.regular_book_balance
 
     # Rollover requirement
     rollover_required = (config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier
@@ -223,9 +224,10 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
             exit_reason = "max_bets_exceeded"
             break
 
-    # Calculate net profit (total across both books minus initial deposit)
+    # Calculate net profit (total across both books minus initial capital)
     total_final = promo_balance + regular_balance
-    net_profit = total_final - (config.deposit * 2)  # Initial capital was 2x deposit
+    initial_capital = config.deposit + config.regular_book_balance
+    net_profit = total_final - initial_capital
 
     return SimulationResult(
         net_profit=net_profit,
@@ -264,7 +266,7 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     max_profit = np.max(net_profits)
 
     # ROI calculation
-    initial_capital = config.deposit * 2
+    initial_capital = config.deposit + config.regular_book_balance
     avg_roi = (avg_profit / initial_capital) * 100
 
     # Exit reasons and profit breakdown
@@ -297,8 +299,10 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print("="*70)
 
     print("\n📊 CONFIGURATION:")
-    print(f"  Deposit:                ${config.deposit:,.2f}")
+    print(f"  Promo Book Deposit:     ${config.deposit:,.2f}")
     print(f"  Bonus:                  {config.bonus_percentage}% (${config.deposit * config.bonus_percentage / 100:,.2f})")
+    print(f"  Regular Book Balance:   ${config.regular_book_balance:,.2f}")
+    print(f"  Total Initial Capital:  ${config.deposit + config.regular_book_balance:,.2f}")
     print(f"  Rollover Requirement:   {config.rollover_multiplier}x (${(config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier:,.2f})")
     print(f"  Hold Range:             {config.min_hold*100:.2f}% - {config.max_hold*100:.2f}%")
     print(f"  Bet Size Range:         ${config.min_bet_size:,.2f} - ${config.max_bet_size:,.2f}")
@@ -369,6 +373,8 @@ def main():
                        help="Minimum promo book odds in American format (default: -200)")
     parser.add_argument("--max-promo-odds", type=int, default=450,
                        help="Maximum promo book odds in American format (default: 450)")
+    parser.add_argument("--regular-book-balance", type=float, default=1000.0,
+                       help="Starting balance in regular (hedge) book (default: 1000)")
 
     args = parser.parse_args()
 
@@ -383,7 +389,8 @@ def main():
         max_bet_size=args.max_bet,
         num_simulations=args.simulations,
         min_promo_odds=args.min_promo_odds,
-        max_promo_odds=args.max_promo_odds
+        max_promo_odds=args.max_promo_odds,
+        regular_book_balance=args.regular_book_balance
     )
 
     print("Starting Monte Carlo simulation...")
