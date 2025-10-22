@@ -293,15 +293,17 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     # Calculate net profit
     initial_capital = config.deposit + config.regular_book_balance
 
-    # For incomplete conversions (insufficient_capital), promo funds are LOCKED and can't be withdrawn
-    # Only count withdrawable funds in profit calculation
-    if exit_reason == "insufficient_capital":
+    # Determine if promo funds are withdrawable
+    # Promo funds are LOCKED unless rollover requirement is met
+    rollover_met = rollover_achieved >= rollover_required
+
+    if exit_reason == "insufficient_capital" or (exit_reason == "lost_promo" and not rollover_met):
+        # Promo funds are LOCKED - either due to insufficient capital or incomplete rollover
         # Can only withdraw regular book funds
-        # Lost the entire promo deposit since funds are locked
         withdrawable = regular_balance
         net_profit = withdrawable - initial_capital
     else:
-        # Success scenarios: can withdraw from both books
+        # Rollover met OR rollover_met exit: can withdraw from both books
         total_final = promo_balance + regular_balance
         net_profit = total_final - initial_capital
 
@@ -378,13 +380,25 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     p95_capital_required = np.percentile(capital_required, 95)
     p99_capital_required = np.percentile(capital_required, 99)
 
-    # Success rate (true conversions only)
-    successful_conversions = lost_promo + rollover_met
+    # Success rate (true conversions only - rollover must be met)
+    # Lost promo only counts as success if rollover was achieved
+    rollover_required_val = (config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier
+    lost_promo_with_rollover = sum(1 for r in results if r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val)
+    lost_promo_without_rollover = lost_promo - lost_promo_with_rollover
+
+    successful_conversions = lost_promo_with_rollover + rollover_met
     success_rate = (successful_conversions / len(results)) * 100
 
-    # Successful conversion profits only
-    successful_profits = [r.net_profit for r in results if r.exit_reason in ["lost_promo", "rollover_met"]]
+    # Successful conversion profits only (rollover met)
+    successful_profits = [r.net_profit for r in results
+                         if r.exit_reason == "rollover_met" or
+                         (r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val)]
     avg_successful_profit = np.mean(successful_profits) if successful_profits else 0
+
+    # Failed lost_promo profits (rollover not met)
+    failed_lost_promo_profits = [r.net_profit for r in results
+                                 if r.exit_reason == "lost_promo" and r.rollover_achieved < rollover_required_val]
+    avg_failed_lost_promo_profit = np.mean(failed_lost_promo_profits) if failed_lost_promo_profits else 0
 
     # Percentiles
     p5 = np.percentile(net_profits, 5)
@@ -433,14 +447,22 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print("\n✅ SUCCESS RATE:")
     print(f"  Successful Conversions: {successful_conversions:,} ({success_rate:.1f}%)")
     print(f"  Avg Profit (Success):   ${avg_successful_profit:,.2f}")
-    print(f"  Failed Conversions:     {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%)")
+    total_failed = insufficient_capital + lost_promo_without_rollover
+    print(f"  Failed Conversions:     {total_failed:,} ({total_failed/len(results)*100:.1f}%)")
     if insufficient_capital > 0:
-        print(f"  Avg Profit (Failed):    ${avg_profit_insufficient_capital:,.2f} (promo funds LOCKED)")
+        print(f"    → Insufficient Cap:   ${avg_profit_insufficient_capital:,.2f} (promo LOCKED)")
+    if lost_promo_without_rollover > 0:
+        print(f"    → Lost Promo (No RO): ${avg_failed_lost_promo_profit:,.2f} (promo LOCKED)")
 
     print("\n🎲 EXIT SCENARIOS:")
-    print(f"  Lost Promo Book:        {lost_promo:,} ({lost_promo/len(results)*100:.1f}%) ✅")
-    if lost_promo > 0:
-        print(f"    → Avg Profit:         ${avg_profit_lost_promo:,.2f}")
+    if lost_promo_with_rollover > 0:
+        lost_promo_with_ro_profits = [r.net_profit for r in results if r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val]
+        avg_lost_promo_with_ro = np.mean(lost_promo_with_ro_profits)
+        print(f"  Lost Promo (Rollover):  {lost_promo_with_rollover:,} ({lost_promo_with_rollover/len(results)*100:.1f}%) ✅")
+        print(f"    → Avg Profit:         ${avg_lost_promo_with_ro:,.2f}")
+    if lost_promo_without_rollover > 0:
+        print(f"  Lost Promo (No Rollover): {lost_promo_without_rollover:,} ({lost_promo_without_rollover/len(results)*100:.1f}%) ❌")
+        print(f"    → Avg Profit:         ${avg_failed_lost_promo_profit:,.2f} (promo LOCKED)")
     print(f"  Rollover Met:           {rollover_met:,} ({rollover_met/len(results)*100:.1f}%) ✅")
     if rollover_met > 0:
         print(f"    → Avg Profit:         ${avg_profit_rollover:,.2f}")
