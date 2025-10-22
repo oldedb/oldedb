@@ -187,11 +187,16 @@ def generate_bet_scenario(config: BettingConfig, promo_balance: float) -> Tuple[
     # Add some randomness (±10%)
     promo_bet *= random.uniform(0.9, 1.1)
 
-    # Cap at promo balance
-    promo_bet = min(promo_bet, promo_balance * 0.95)
-
-    # Ensure minimum bet (use the smaller of min_bet_size or min_underdog_bet)
-    promo_bet = max(promo_bet, config.min_bet_size)
+    # If promo balance is low, bet everything remaining
+    # Otherwise, cap at promo balance with small margin for safety
+    if promo_balance < config.min_bet_size * 2:
+        # Low balance: bet everything
+        promo_bet = promo_balance
+    else:
+        # Normal balance: cap at 95% for safety
+        promo_bet = min(promo_bet, promo_balance * 0.95)
+        # Ensure minimum bet (use the smaller of min_bet_size or min_underdog_bet)
+        promo_bet = max(promo_bet, config.min_bet_size)
 
     return promo_bet, promo_odds, regular_odds, actual_hold
 
@@ -275,8 +280,8 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         rollover_achieved += rollover_credit
 
         # Check exit conditions
-        if promo_balance < config.min_bet_size:
-            # Lost on promo book (bonus depleted)
+        if promo_balance < 10:
+            # Lost on promo book (bonus essentially depleted to $0)
             exit_reason = "lost_promo"
             break
 
