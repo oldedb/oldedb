@@ -40,7 +40,9 @@ class SimulationResult:
     rollover_achieved: float
     promo_book_final: float
     regular_book_final: float
-    exit_reason: str  # 'lost_promo' or 'rollover_met'
+    exit_reason: str  # 'lost_promo', 'rollover_met', or 'insufficient_capital'
+    max_regular_balance_used: float  # Peak capital deployed in regular book
+    min_regular_balance: float  # Lowest regular book balance reached
 
 
 def american_to_decimal(american_odds: int) -> float:
@@ -206,6 +208,10 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     num_bets = 0
     exit_reason = ""
 
+    # Track capital requirements
+    max_regular_balance_used = config.regular_book_balance
+    min_regular_balance = config.regular_book_balance
+
     # Continue betting until exit condition met
     while True:
         num_bets += 1
@@ -250,6 +256,9 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         promo_balance += promo_change
         regular_balance += regular_change
 
+        # Track capital requirements
+        min_regular_balance = min(min_regular_balance, regular_balance)
+
         # Update rollover
         rollover_achieved += promo_bet
 
@@ -269,10 +278,23 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
             exit_reason = "max_bets_exceeded"
             break
 
-    # Calculate net profit (total across both books minus initial capital)
-    total_final = promo_balance + regular_balance
+    # Calculate net profit
     initial_capital = config.deposit + config.regular_book_balance
-    net_profit = total_final - initial_capital
+
+    # For incomplete conversions (insufficient_capital), promo funds are LOCKED and can't be withdrawn
+    # Only count withdrawable funds in profit calculation
+    if exit_reason == "insufficient_capital":
+        # Can only withdraw regular book funds
+        # Lost the entire promo deposit since funds are locked
+        withdrawable = regular_balance
+        net_profit = withdrawable - initial_capital
+    else:
+        # Success scenarios: can withdraw from both books
+        total_final = promo_balance + regular_balance
+        net_profit = total_final - initial_capital
+
+    # Calculate capital requirement (how much hedge book was actually needed)
+    capital_deployed = config.regular_book_balance - min_regular_balance
 
     return SimulationResult(
         net_profit=net_profit,
@@ -280,7 +302,9 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         rollover_achieved=rollover_achieved,
         promo_book_final=promo_balance,
         regular_book_final=regular_balance,
-        exit_reason=exit_reason
+        exit_reason=exit_reason,
+        max_regular_balance_used=capital_deployed,
+        min_regular_balance=min_regular_balance
     )
 
 
@@ -332,6 +356,23 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     avg_bets = np.mean(num_bets)
     median_bets = np.median(num_bets)
 
+    # Capital requirements (hedge book)
+    capital_required = [r.max_regular_balance_used for r in results]
+    avg_capital_required = np.mean(capital_required)
+    median_capital_required = np.median(capital_required)
+    p75_capital_required = np.percentile(capital_required, 75)
+    p90_capital_required = np.percentile(capital_required, 90)
+    p95_capital_required = np.percentile(capital_required, 95)
+    p99_capital_required = np.percentile(capital_required, 99)
+
+    # Success rate (true conversions only)
+    successful_conversions = lost_promo + rollover_met
+    success_rate = (successful_conversions / len(results)) * 100
+
+    # Successful conversion profits only
+    successful_profits = [r.net_profit for r in results if r.exit_reason in ["lost_promo", "rollover_met"]]
+    avg_successful_profit = np.mean(successful_profits) if successful_profits else 0
+
     # Percentiles
     p5 = np.percentile(net_profits, 5)
     p25 = np.percentile(net_profits, 25)
@@ -374,16 +415,34 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print(f"  75th Percentile:        ${p75:,.2f}")
     print(f"  95th Percentile:        ${p95:,.2f}")
 
+    print("\n✅ SUCCESS RATE:")
+    print(f"  Successful Conversions: {successful_conversions:,} ({success_rate:.1f}%)")
+    print(f"  Avg Profit (Success):   ${avg_successful_profit:,.2f}")
+    print(f"  Failed Conversions:     {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%)")
+    if insufficient_capital > 0:
+        print(f"  Avg Profit (Failed):    ${avg_profit_insufficient_capital:,.2f} (promo funds LOCKED)")
+
     print("\n🎲 EXIT SCENARIOS:")
-    print(f"  Lost Promo Book:        {lost_promo:,} ({lost_promo/len(results)*100:.1f}%)")
+    print(f"  Lost Promo Book:        {lost_promo:,} ({lost_promo/len(results)*100:.1f}%) ✅")
     if lost_promo > 0:
         print(f"    → Avg Profit:         ${avg_profit_lost_promo:,.2f}")
-    print(f"  Rollover Met:           {rollover_met:,} ({rollover_met/len(results)*100:.1f}%)")
+    print(f"  Rollover Met:           {rollover_met:,} ({rollover_met/len(results)*100:.1f}%) ✅")
     if rollover_met > 0:
         print(f"    → Avg Profit:         ${avg_profit_rollover:,.2f}")
     if insufficient_capital > 0:
-        print(f"  Insufficient Capital:   {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%)")
+        print(f"  Insufficient Capital:   {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%) ❌")
         print(f"    → Avg Profit:         ${avg_profit_insufficient_capital:,.2f}")
+
+    print("\n💰 HEDGE BOOK CAPITAL REQUIREMENTS:")
+    print(f"  Average Capital Needed: ${avg_capital_required:,.2f}")
+    print(f"  Median Capital Needed:  ${median_capital_required:,.2f}")
+    print(f"  75th Percentile:        ${p75_capital_required:,.2f}")
+    print(f"  90th Percentile:        ${p90_capital_required:,.2f}")
+    print(f"  95th Percentile:        ${p95_capital_required:,.2f}")
+    print(f"  99th Percentile:        ${p99_capital_required:,.2f}")
+    print(f"  ")
+    print(f"  💡 To achieve {success_rate:.0f}% success rate: ${p95_capital_required:,.2f}")
+    print(f"  💡 To achieve 99% success rate: ${p99_capital_required:,.2f}")
 
     print("\n🎯 BETTING STATISTICS:")
     print(f"  Average Bets Needed:    {avg_bets:.1f}")
@@ -426,8 +485,8 @@ def main():
                        help="Minimum promo book odds in American format (default: -200)")
     parser.add_argument("--max-promo-odds", type=int, default=450,
                        help="Maximum promo book odds in American format (default: 450)")
-    parser.add_argument("--regular-book-balance", type=float, default=1000.0,
-                       help="Starting balance in regular (hedge) book (default: 1000)")
+    parser.add_argument("--regular-book-balance", type=float, default=50000.0,
+                       help="Starting balance in regular (hedge) book (default: 50000 for unlimited)")
 
     args = parser.parse_args()
 
