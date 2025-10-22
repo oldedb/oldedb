@@ -90,6 +90,12 @@ rollover = st.sidebar.slider(
     help="How many times you must wager (deposit + bonus)"
 )
 
+rollover_lesser_of_bet_win = st.sidebar.checkbox(
+    "Rollover = Lesser of Bet/Win",
+    value=False,
+    help="Some sportsbooks only credit the lesser of bet amount or win amount toward rollover when winning"
+)
+
 # Hold Parameters
 st.sidebar.subheader("📊 Hold Range")
 min_hold = st.sidebar.slider(
@@ -208,6 +214,7 @@ if run_button:
         deposit=deposit,
         bonus_percentage=bonus_pct,
         rollover_multiplier=rollover,
+        rollover_lesser_of_bet_win=rollover_lesser_of_bet_win,
         min_hold=min_hold,
         max_hold=max_hold,
         target_hold=target_hold,

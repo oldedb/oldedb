@@ -19,6 +19,7 @@ class BettingConfig:
     deposit: float
     bonus_percentage: float  # e.g., 100 for 100% match
     rollover_multiplier: float  # e.g., 10 for 10x rollover
+    rollover_lesser_of_bet_win: bool  # If True, rollover credit = min(bet, win) when winning
     min_hold: float  # e.g., 0.0 for 0%
     max_hold: float  # e.g., 0.035 for 3.5%
     target_hold: float  # e.g., 0.018 for 1.8% - peak of distribution
@@ -261,8 +262,17 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         promo_balance += promo_change
         regular_balance += regular_change
 
-        # Update rollover
-        rollover_achieved += promo_bet
+        # Update rollover credit
+        if config.rollover_lesser_of_bet_win and promo_wins:
+            # Some sportsbooks only credit the lesser of bet amount or win amount
+            # Win amount = promo_change (already calculated as profit)
+            win_amount = abs(promo_change)
+            rollover_credit = min(promo_bet, win_amount)
+        else:
+            # Standard: full bet amount counts toward rollover
+            rollover_credit = promo_bet
+
+        rollover_achieved += rollover_credit
 
         # Check exit conditions
         if promo_balance < config.min_bet_size:
@@ -393,6 +403,8 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print(f"  Regular Book Balance:   ${config.regular_book_balance:,.2f}")
     print(f"  Total Initial Capital:  ${config.deposit + config.regular_book_balance:,.2f}")
     print(f"  Rollover Requirement:   {config.rollover_multiplier}x (${(config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier:,.2f})")
+    rollover_mode = "Lesser of Bet/Win" if config.rollover_lesser_of_bet_win else "Full Bet Amount"
+    print(f"  Rollover Credit Mode:   {rollover_mode}")
     print(f"  Hold Range:             {config.min_hold*100:.2f}% - {config.max_hold*100:.2f}% (target: {config.target_hold*100:.2f}%)")
     print(f"  Bet Size Range:         ${config.min_bet_size:,.2f} - ${config.max_bet_size:,.2f}")
     print(f"  Max Favorite Bet:       ${config.max_favorite_bet:,.2f}")
@@ -468,6 +480,8 @@ def main():
                        help="Bonus percentage (default: 100 for 100%% match)")
     parser.add_argument("--rollover", type=float, default=10.0,
                        help="Rollover multiplier (default: 10 for 10x)")
+    parser.add_argument("--rollover-lesser-of-bet-win", action="store_true", default=False,
+                       help="If set, rollover credit = min(bet, win) when winning (some sportsbooks only)")
     parser.add_argument("--min-hold", type=float, default=0.0,
                        help="Minimum hold percentage (default: 0.0)")
     parser.add_argument("--max-hold", type=float, default=0.035,
@@ -498,6 +512,7 @@ def main():
         deposit=args.deposit,
         bonus_percentage=args.bonus_pct,
         rollover_multiplier=args.rollover,
+        rollover_lesser_of_bet_win=args.rollover_lesser_of_bet_win,
         min_hold=args.min_hold,
         max_hold=args.max_hold,
         target_hold=args.target_hold,
