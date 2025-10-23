@@ -429,7 +429,7 @@ if run_button:
                 st.markdown("#### ✅ Lost Promo Book (Success)")
                 st.write(f"**Count:** {lost_promo:,} ({lost_promo/len(results)*100:.1f}%)")
                 st.write(f"**Avg Profit:** ${np.mean(lost_promo_profits):,.2f}")
-                st.write(f"**Outcome:** Full bonus converted to withdrawable cash")
+                st.write(f"**Outcome:** All promo funds lost in betting, won on hedge side")
                 st.markdown("---")
 
             # Rollover Met

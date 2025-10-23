@@ -298,17 +298,18 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     # Calculate net profit
     initial_capital = config.deposit + config.regular_book_balance
 
-    # Determine if promo funds are withdrawable
-    # Promo funds are LOCKED unless rollover requirement is met
-    rollover_met = rollover_achieved >= rollover_required
-
-    if exit_reason == "insufficient_capital" or (exit_reason == "lost_promo" and not rollover_met):
-        # Promo funds are LOCKED - either due to insufficient capital or incomplete rollover
+    if exit_reason == "insufficient_capital":
+        # FAILURE: Promo funds still remain in promo book but can't continue betting
+        # Those remaining promo funds are LOCKED (rollover incomplete)
         # Can only withdraw regular book funds
         withdrawable = regular_balance
         net_profit = withdrawable - initial_capital
     else:
-        # Rollover met OR rollover_met exit: can withdraw from both books
+        # SUCCESS: Either "lost_promo" or "rollover_met"
+        # - lost_promo: All promo funds were bet and lost, won on hedge side (promo_balance ≈ $0)
+        #               Hedge wins are fully withdrawable - this IS the conversion!
+        # - rollover_met: Completed rollover, can withdraw from both books
+        # All funds are withdrawable in both cases
         total_final = promo_balance + regular_balance
         net_profit = total_final - initial_capital
 
@@ -385,25 +386,25 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     p95_capital_required = np.percentile(capital_required, 95)
     p99_capital_required = np.percentile(capital_required, 99)
 
-    # Success rate (true conversions only - rollover must be met)
-    # Lost promo only counts as success if rollover was achieved
-    rollover_required_val = (config.deposit + config.deposit * config.bonus_percentage / 100) * config.rollover_multiplier
-    lost_promo_with_rollover = sum(1 for r in results if r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val)
-    lost_promo_without_rollover = lost_promo - lost_promo_with_rollover
-
-    successful_conversions = lost_promo_with_rollover + rollover_met
+    # Success rate: lost_promo and rollover_met are BOTH successes
+    # - lost_promo: All promo funds lost = all hedge bets won = successful conversion
+    # - rollover_met: Completed rollover requirement
+    # - insufficient_capital: FAILURE - promo funds remain locked
+    successful_conversions = lost_promo + rollover_met
     success_rate = (successful_conversions / len(results)) * 100
 
-    # Successful conversion profits only (rollover met)
+    # Successful conversion profits (both exit types)
     successful_profits = [r.net_profit for r in results
-                         if r.exit_reason == "rollover_met" or
-                         (r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val)]
+                         if r.exit_reason in ["rollover_met", "lost_promo"]]
     avg_successful_profit = np.mean(successful_profits) if successful_profits else 0
 
-    # Failed lost_promo profits (rollover not met)
-    failed_lost_promo_profits = [r.net_profit for r in results
-                                 if r.exit_reason == "lost_promo" and r.rollover_achieved < rollover_required_val]
-    avg_failed_lost_promo_profit = np.mean(failed_lost_promo_profits) if failed_lost_promo_profits else 0
+    # Lost promo average profit
+    lost_promo_profits = [r.net_profit for r in results if r.exit_reason == "lost_promo"]
+    avg_lost_promo_profit = np.mean(lost_promo_profits) if lost_promo_profits else 0
+
+    # Rollover met average profit
+    rollover_met_profits = [r.net_profit for r in results if r.exit_reason == "rollover_met"]
+    avg_rollover_met_profit = np.mean(rollover_met_profits) if rollover_met_profits else 0
 
     # Percentiles
     p5 = np.percentile(net_profits, 5)
@@ -452,28 +453,24 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print("\n✅ SUCCESS RATE:")
     print(f"  Successful Conversions: {successful_conversions:,} ({success_rate:.1f}%)")
     print(f"  Avg Profit (Success):   ${avg_successful_profit:,.2f}")
-    total_failed = insufficient_capital + lost_promo_without_rollover
-    print(f"  Failed Conversions:     {total_failed:,} ({total_failed/len(results)*100:.1f}%)")
     if insufficient_capital > 0:
-        print(f"    → Insufficient Cap:   ${avg_profit_insufficient_capital:,.2f} (promo LOCKED)")
-    if lost_promo_without_rollover > 0:
-        print(f"    → Lost Promo (No RO): ${avg_failed_lost_promo_profit:,.2f} (promo LOCKED)")
+        fail_rate = (insufficient_capital / len(results)) * 100
+        print(f"  Failed Conversions:     {insufficient_capital:,} ({fail_rate:.1f}%)")
+        print(f"    → Avg Profit:         ${avg_profit_insufficient_capital:,.2f} (promo LOCKED)")
 
     print("\n🎲 EXIT SCENARIOS:")
-    if lost_promo_with_rollover > 0:
-        lost_promo_with_ro_profits = [r.net_profit for r in results if r.exit_reason == "lost_promo" and r.rollover_achieved >= rollover_required_val]
-        avg_lost_promo_with_ro = np.mean(lost_promo_with_ro_profits)
-        print(f"  Lost Promo (Rollover):  {lost_promo_with_rollover:,} ({lost_promo_with_rollover/len(results)*100:.1f}%) ✅")
-        print(f"    → Avg Profit:         ${avg_lost_promo_with_ro:,.2f}")
-    if lost_promo_without_rollover > 0:
-        print(f"  Lost Promo (No Rollover): {lost_promo_without_rollover:,} ({lost_promo_without_rollover/len(results)*100:.1f}%) ❌")
-        print(f"    → Avg Profit:         ${avg_failed_lost_promo_profit:,.2f} (promo LOCKED)")
+    if lost_promo > 0:
+        print(f"  Lost Promo Book:        {lost_promo:,} ({lost_promo/len(results)*100:.1f}%) ✅")
+        print(f"    → Avg Profit:         ${avg_lost_promo_profit:,.2f}")
+        print(f"    → All promo funds lost in betting, won on hedge side")
     print(f"  Rollover Met:           {rollover_met:,} ({rollover_met/len(results)*100:.1f}%) ✅")
     if rollover_met > 0:
-        print(f"    → Avg Profit:         ${avg_profit_rollover:,.2f}")
+        print(f"    → Avg Profit:         ${avg_rollover_met_profit:,.2f}")
+        print(f"    → Completed rollover requirement")
     if insufficient_capital > 0:
         print(f"  Insufficient Capital:   {insufficient_capital:,} ({insufficient_capital/len(results)*100:.1f}%) ❌")
         print(f"    → Avg Profit:         ${avg_profit_insufficient_capital:,.2f}")
+        print(f"    → Promo funds remain LOCKED")
 
     print("\n💰 HEDGE BOOK CAPITAL REQUIREMENTS:")
     print(f"  Average Capital Needed: ${avg_capital_required:,.2f}")
