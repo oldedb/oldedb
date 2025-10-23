@@ -25,8 +25,6 @@ class BettingConfig:
     target_hold: float  # e.g., 0.018 for 1.8% - peak of distribution
     min_bet_size: float
     max_bet_size: float
-    max_favorite_bet: float  # Maximum bet on favorite side
-    min_underdog_bet: float  # Minimum bet on underdog side
     num_simulations: int
     min_promo_odds: int  # e.g., -200
     max_promo_odds: int  # e.g., 450
@@ -138,65 +136,25 @@ def generate_bet_scenario(config: BettingConfig, promo_balance: float) -> Tuple[
     # Actual hold (may differ slightly due to rounding)
     actual_hold = calculate_hold(promo_odds, regular_odds)
 
-    # Determine which side is favorite (negative odds) vs underdog (positive odds)
-    promo_is_underdog = promo_odds > 0
-    regular_is_underdog = regular_odds > 0
-
-    # Calculate decimal odds for bet sizing
-    promo_decimal = american_to_decimal(promo_odds)
-    regular_decimal = american_to_decimal(regular_odds)
-
-    # Determine bet sizes respecting favorite/underdog constraints
-    # Strategy: Size bets so favorite ≤ max_favorite_bet and underdog ≥ min_underdog_bet
-
-    if promo_is_underdog:
-        # Promo is underdog, regular is favorite
-        # Start with max favorite bet on regular side
-        max_regular_bet = min(config.max_favorite_bet, config.max_bet_size)
-        # Calculate required promo bet
-        calculated_promo_bet = (max_regular_bet * regular_decimal) / promo_decimal
-
-        # Ensure promo (underdog) meets minimum
-        if calculated_promo_bet < config.min_underdog_bet:
-            promo_bet = config.min_underdog_bet
-        else:
-            promo_bet = calculated_promo_bet
-
-        # Apply hold-based scaling (lower hold = larger bet)
-        hold_factor = 1 - (actual_hold / config.max_hold)
-        promo_bet *= (0.6 + 0.4 * hold_factor)  # Scale between 60% and 100%
-
-    else:
-        # Promo is favorite, regular is underdog
-        # Start with max favorite bet on promo side
-        max_promo_bet = min(config.max_favorite_bet, config.max_bet_size)
-        promo_bet = max_promo_bet
-
-        # Calculate required regular bet
-        calculated_regular_bet = (promo_bet * promo_decimal) / regular_decimal
-
-        # Ensure regular (underdog) meets minimum
-        if calculated_regular_bet < config.min_underdog_bet:
-            # Recalculate from min underdog
-            promo_bet = (config.min_underdog_bet * regular_decimal) / promo_decimal
-
-        # Apply hold-based scaling
-        hold_factor = 1 - (actual_hold / config.max_hold)
-        promo_bet *= (0.6 + 0.4 * hold_factor)  # Scale between 60% and 100%
+    # Simple bet sizing: scale based on hold percentage
+    # Lower hold = larger bet (better opportunity)
+    # Higher hold = smaller bet (worse opportunity)
+    hold_factor = 1 - (actual_hold / config.max_hold)
+    base_bet = config.min_bet_size + (config.max_bet_size - config.min_bet_size) * hold_factor
 
     # Add some randomness (±10%)
-    promo_bet *= random.uniform(0.9, 1.1)
+    promo_bet = base_bet * random.uniform(0.9, 1.1)
 
-    # If promo balance is low, bet everything remaining
-    # Otherwise, cap at promo balance with small margin for safety
-    if promo_balance < config.min_bet_size * 2:
+    # If promo balance is low (below min bet threshold), bet everything remaining
+    # Otherwise, ensure bet is within min/max range and available balance
+    if promo_balance < config.min_bet_size:
         # Low balance: bet everything
         promo_bet = promo_balance
     else:
-        # Normal balance: cap at 95% for safety
+        # Ensure within min/max range
+        promo_bet = max(config.min_bet_size, min(promo_bet, config.max_bet_size))
+        # Cap at available balance (with small margin for safety)
         promo_bet = min(promo_bet, promo_balance * 0.95)
-        # Ensure minimum bet (use the smaller of min_bet_size or min_underdog_bet)
-        promo_bet = max(promo_bet, config.min_bet_size)
 
     return promo_bet, promo_odds, regular_odds, actual_hold
 
@@ -427,8 +385,6 @@ def analyze_results(results: List[SimulationResult], config: BettingConfig):
     print(f"  Rollover Credit Mode:   {rollover_mode}")
     print(f"  Hold Range:             {config.min_hold*100:.2f}% - {config.max_hold*100:.2f}% (target: {config.target_hold*100:.2f}%)")
     print(f"  Bet Size Range:         ${config.min_bet_size:,.2f} - ${config.max_bet_size:,.2f}")
-    print(f"  Max Favorite Bet:       ${config.max_favorite_bet:,.2f}")
-    print(f"  Min Underdog Bet:       ${config.min_underdog_bet:,.2f}")
     print(f"  Promo Odds Range:       {config.min_promo_odds:+d} to {config.max_promo_odds:+d}")
     print(f"  Simulations:            {config.num_simulations:,}")
 
@@ -516,10 +472,6 @@ def main():
                        help="Minimum bet size (default: 500)")
     parser.add_argument("--max-bet", type=float, default=1500.0,
                        help="Maximum bet size (default: 1500)")
-    parser.add_argument("--max-favorite-bet", type=float, default=1500.0,
-                       help="Maximum bet on favorite side (default: 1500)")
-    parser.add_argument("--min-underdog-bet", type=float, default=300.0,
-                       help="Minimum bet on underdog side (default: 300)")
     parser.add_argument("--simulations", type=int, default=10000,
                        help="Number of simulations to run (default: 10000)")
     parser.add_argument("--min-promo-odds", type=int, default=-200,
@@ -542,8 +494,6 @@ def main():
         target_hold=args.target_hold,
         min_bet_size=args.min_bet,
         max_bet_size=args.max_bet,
-        max_favorite_bet=args.max_favorite_bet,
-        min_underdog_bet=args.min_underdog_bet,
         num_simulations=args.simulations,
         min_promo_odds=args.min_promo_odds,
         max_promo_odds=args.max_promo_odds,

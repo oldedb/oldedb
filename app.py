@@ -143,24 +143,6 @@ max_bet = st.sidebar.number_input(
     step=100.0
 )
 
-max_favorite_bet = st.sidebar.number_input(
-    "Max Favorite Bet ($)",
-    min_value=min_bet,
-    max_value=5000.0,
-    value=1500.0,
-    step=100.0,
-    help="Maximum bet on favorite side (negative odds)"
-)
-
-min_underdog_bet = st.sidebar.number_input(
-    "Min Underdog Bet ($)",
-    min_value=50.0,
-    max_value=max_bet,
-    value=300.0,
-    step=50.0,
-    help="Minimum bet on underdog side (positive odds)"
-)
-
 # Odds Range
 st.sidebar.subheader("🎯 Odds Range")
 col1, col2 = st.sidebar.columns(2)
@@ -220,8 +202,6 @@ if run_button:
         target_hold=target_hold,
         min_bet_size=min_bet,
         max_bet_size=max_bet,
-        max_favorite_bet=max_favorite_bet,
-        min_underdog_bet=min_underdog_bet,
         num_simulations=num_simulations,
         min_promo_odds=min_promo_odds,
         max_promo_odds=max_promo_odds,
