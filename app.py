@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import sys
+from io import StringIO
 from monte_carlo_betting_simulator import BettingConfig, run_monte_carlo
 
 # Page configuration
@@ -180,10 +182,19 @@ regular_book_balance = st.sidebar.number_input(
 st.sidebar.subheader("🔬 Simulation")
 num_simulations = st.sidebar.select_slider(
     "Number of Simulations",
-    options=[1000, 2500, 5000, 10000, 25000, 50000],
+    options=[1, 1000, 2500, 5000, 10000, 25000, 50000],
     value=5000,
     help="More simulations = more accurate but slower"
 )
+
+verbose = st.sidebar.checkbox(
+    "Verbose Mode (detailed output)",
+    value=False,
+    help="Show bet-by-bet details (recommended only with 1 simulation)"
+)
+
+if verbose and num_simulations > 1:
+    st.sidebar.warning("⚠️ Verbose mode works best with 1 simulation")
 
 # Run button
 st.sidebar.markdown("---")
@@ -205,12 +216,25 @@ if run_button:
         num_simulations=num_simulations,
         min_promo_odds=min_promo_odds,
         max_promo_odds=max_promo_odds,
-        regular_book_balance=regular_book_balance
+        regular_book_balance=regular_book_balance,
+        verbose=verbose
     )
 
     # Run simulation with progress bar
+    # Capture verbose output if enabled
+    verbose_output = None
+    if verbose:
+        # Capture stdout to display verbose output
+        old_stdout = sys.stdout
+        sys.stdout = captured_output = StringIO()
+
     with st.spinner(f'Running {num_simulations:,} simulations...'):
         results = run_monte_carlo(config)
+
+    if verbose:
+        # Restore stdout and get captured output
+        sys.stdout = old_stdout
+        verbose_output = captured_output.getvalue()
 
     # Calculate statistics
     net_profits = [r.net_profit for r in results]
@@ -263,6 +287,13 @@ if run_button:
         )
 
     # Tabs for different views
+    # Display verbose output if enabled
+    if verbose and verbose_output:
+        st.markdown("---")
+        with st.expander("📋 Detailed Bet-by-Bet Output", expanded=True):
+            st.code(verbose_output, language=None)
+        st.markdown("---")
+
     tab1, tab2, tab3, tab4 = st.tabs(["💰 Profit Analysis", "📈 Capital Requirements", "🎲 Exit Scenarios", "📊 Distributions"])
 
     with tab1:
