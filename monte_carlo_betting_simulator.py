@@ -53,6 +53,25 @@ def american_to_decimal(american_odds: int) -> float:
         return (100 / abs(american_odds)) + 1
 
 
+def american_to_implied_probability(american_odds: int) -> float:
+    """
+    Convert American odds to implied probability
+
+    For positive odds (+X): probability = 100 / (odds + 100)
+    For negative odds (-X): probability = |odds| / (|odds| + 100)
+
+    Examples:
+    +300 → 100 / 400 = 0.25 (25% chance)
+    -300 → 300 / 400 = 0.75 (75% chance)
+    +100 → 100 / 200 = 0.50 (50% chance)
+    -110 → 110 / 210 = 0.524 (52.4% chance)
+    """
+    if american_odds > 0:
+        return 100 / (american_odds + 100)
+    else:
+        return abs(american_odds) / (abs(american_odds) + 100)
+
+
 def decimal_to_american(decimal_odds: float) -> int:
     """Convert decimal odds to American odds"""
     if decimal_odds >= 2.0:
@@ -225,8 +244,10 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         balance_after_bet_placement = regular_balance - regular_bet
         min_regular_balance = min(min_regular_balance, balance_after_bet_placement)
 
-        # Simulate outcome (50/50 chance for each side)
-        promo_wins = random.random() < 0.5
+        # Simulate outcome based on implied probability from odds
+        # The promo side should win according to its implied probability
+        promo_win_probability = american_to_implied_probability(promo_odds)
+        promo_wins = random.random() < promo_win_probability
 
         # Calculate outcome
         promo_change, regular_change = calculate_bet_outcome(
