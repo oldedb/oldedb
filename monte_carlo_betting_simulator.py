@@ -29,6 +29,7 @@ class BettingConfig:
     min_promo_odds: int  # e.g., -200
     max_promo_odds: int  # e.g., 450
     regular_book_balance: float  # Starting balance in regular (hedge) book
+    verbose: bool = False  # If True, print detailed bet-by-bet info (only for single sim)
 
 
 @dataclass
@@ -176,6 +177,17 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     max_regular_balance_used = config.regular_book_balance
     min_regular_balance = config.regular_book_balance
 
+    # Verbose mode header
+    if config.verbose:
+        print("\n" + "="*80)
+        print("DETAILED BET-BY-BET SIMULATION")
+        print("="*80)
+        print(f"\n📊 STARTING BALANCES:")
+        print(f"  Promo Book:   ${promo_balance:,.2f}")
+        print(f"  Hedge Book:   ${regular_balance:,.2f}")
+        print(f"  Rollover Req: ${rollover_required:,.2f}")
+        print("\n" + "-"*80 + "\n")
+
     # Continue betting until exit condition met
     while True:
         num_bets += 1
@@ -225,6 +237,18 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
         promo_balance += promo_change
         regular_balance += regular_change
 
+        # Verbose output for this bet
+        if config.verbose:
+            print(f"🎲 BET #{num_bets}")
+            print(f"  Promo Bet:    ${promo_bet:,.2f} @ {promo_odds:+d} → {'WIN ✅' if promo_wins else 'LOSS ❌'} → {promo_change:+,.2f}")
+            print(f"  Hedge Bet:    ${regular_bet:,.2f} @ {regular_odds:+d} → {'WIN ✅' if not promo_wins else 'LOSS ❌'} → {regular_change:+,.2f}")
+            print(f"  Hold:         {hold*100:.2f}%")
+            net_change = promo_change + regular_change
+            print(f"  Net P/L:      ${net_change:+,.2f}")
+            print(f"\n  New Balances:")
+            print(f"    Promo Book: ${promo_balance:,.2f}")
+            print(f"    Hedge Book: ${regular_balance:,.2f}")
+
         # Update rollover credit
         if config.rollover_lesser_of_bet_win and promo_wins:
             # Some sportsbooks only credit the lesser of bet amount or win amount
@@ -236,6 +260,12 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
             rollover_credit = promo_bet
 
         rollover_achieved += rollover_credit
+
+        # Verbose rollover progress
+        if config.verbose:
+            rollover_pct = (rollover_achieved / rollover_required) * 100
+            print(f"  Rollover:     ${rollover_achieved:,.2f} / ${rollover_required:,.2f} ({rollover_pct:.1f}%)")
+            print("-"*80 + "\n")
 
         # Check exit conditions
         if promo_balance < 10:
@@ -274,6 +304,33 @@ def run_single_simulation(config: BettingConfig) -> SimulationResult:
     # Calculate capital requirement (how much hedge book was actually needed)
     # This represents the maximum capital deployed at any point
     capital_deployed = max(0, config.regular_book_balance - min_regular_balance)
+
+    # Verbose final summary
+    if config.verbose:
+        print("="*80)
+        print("FINAL OUTCOME")
+        print("="*80)
+        print(f"\n📊 EXIT REASON: {exit_reason.upper().replace('_', ' ')}")
+        print(f"  Total Bets:       {num_bets}")
+        print(f"\n💰 FINAL BALANCES:")
+        print(f"  Promo Book:       ${promo_balance:,.2f}")
+        print(f"  Hedge Book:       ${regular_balance:,.2f}")
+        print(f"  Total:            ${promo_balance + regular_balance:,.2f}")
+        print(f"\n📈 ROLLOVER:")
+        print(f"  Achieved:         ${rollover_achieved:,.2f}")
+        print(f"  Required:         ${rollover_required:,.2f}")
+        rollover_pct = (rollover_achieved / rollover_required) * 100
+        print(f"  Progress:         {rollover_pct:.1f}%")
+        print(f"\n💵 PROFIT ANALYSIS:")
+        print(f"  Initial Capital:  ${initial_capital:,.2f}")
+        if exit_reason == "insufficient_capital":
+            print(f"  Withdrawable:     ${regular_balance:,.2f} (promo funds LOCKED)")
+        else:
+            print(f"  Withdrawable:     ${promo_balance + regular_balance:,.2f}")
+        print(f"  Net Profit:       ${net_profit:+,.2f}")
+        print(f"\n💰 CAPITAL DEPLOYED:")
+        print(f"  Max Deployed:     ${capital_deployed:,.2f}")
+        print("\n" + "="*80 + "\n")
 
     return SimulationResult(
         net_profit=net_profit,
@@ -480,6 +537,8 @@ def main():
                        help="Maximum promo book odds in American format (default: 450)")
     parser.add_argument("--regular-book-balance", type=float, default=50000.0,
                        help="Starting balance in regular (hedge) book (default: 50000 for unlimited)")
+    parser.add_argument("--verbose", action="store_true",
+                       help="Show detailed bet-by-bet output (best with --simulations 1)")
 
     args = parser.parse_args()
 
@@ -497,7 +556,8 @@ def main():
         num_simulations=args.simulations,
         min_promo_odds=args.min_promo_odds,
         max_promo_odds=args.max_promo_odds,
-        regular_book_balance=args.regular_book_balance
+        regular_book_balance=args.regular_book_balance,
+        verbose=args.verbose
     )
 
     print("Starting Monte Carlo simulation...")
